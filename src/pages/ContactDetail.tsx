@@ -62,6 +62,7 @@ interface Template {
   name: string
   type: string
   content: string
+  subject?: string
 }
 
 export default function ContactDetail() {
@@ -76,9 +77,16 @@ export default function ContactDetail() {
   
   // SMS functionality
   const [isSendingSMS, setIsSendingSMS] = useState(false)
-  const [templates, setTemplates] = useState<Template[]>([])
+  const [smsTemplates, setSmsTemplates] = useState<Template[]>([])
   const [showSMSDialog, setShowSMSDialog] = useState(false)
-  const [selectedTemplate, setSelectedTemplate] = useState("")
+  const [selectedSMSTemplate, setSelectedSMSTemplate] = useState("")
+  
+  // EMAIL functionality
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
+  const [emailTemplates, setEmailTemplates] = useState<Template[]>([])
+  const [showEmailDialog, setShowEmailDialog] = useState(false)
+  const [selectedEmailTemplate, setSelectedEmailTemplate] = useState("")
+  
   const [recentMessages, setRecentMessages] = useState<MessageLog[]>([])
 
   // Edit form state
@@ -134,7 +142,7 @@ export default function ContactDetail() {
     if (contact) {
       fetchMessageLogs()
     }
-  }, [contact, isSendingSMS])
+  }, [contact, isSendingSMS, isSendingEmail])
 
   const fetchContact = async () => {
     if (!id) return
@@ -171,15 +179,27 @@ export default function ContactDetail() {
 
   const fetchTemplates = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch SMS templates
+      const { data: smsData, error: smsError } = await supabase
         .from("message_templates")
         .select("*")
         .eq("type", "sms")
         .eq("is_active", true)
         .order("name")
 
-      if (error) throw error
-      setTemplates(data || [])
+      if (smsError) throw smsError
+      setSmsTemplates(smsData || [])
+
+      // Fetch Email templates
+      const { data: emailData, error: emailError } = await supabase
+        .from("message_templates")
+        .select("*")
+        .eq("type", "email")
+        .eq("is_active", true)
+        .order("name")
+
+      if (emailError) throw emailError
+      setEmailTemplates(emailData || [])
     } catch (error) {
       console.error("Error fetching templates:", error)
     }
@@ -315,19 +335,19 @@ export default function ContactDetail() {
   }
 
   const handleSendSMS = async () => {
-    if (!selectedTemplate || !contact) return
+    if (!selectedSMSTemplate || !contact) return
 
     setIsSendingSMS(true)
 
     try {
       console.log("🔥 Sending SMS to Termii API...")
       console.log("Contact:", contact.first_name, contact.phone)
-      console.log("Template:", selectedTemplate)
+      console.log("Template:", selectedSMSTemplate)
 
       const { data, error } = await supabase.functions.invoke("send-sms", {
         body: {
           contactId: contact.id,
-          templateId: selectedTemplate,
+          templateId: selectedSMSTemplate,
           phoneNumber: contact.phone,
           userId: profile?.id,
         },
@@ -346,25 +366,8 @@ export default function ContactDetail() {
           duration: 5000,
         })
 
-        // 🔔 Create notification for SMS sent successfully
-        await supabase.from('notifications').insert({
-          user_id: profile?.id,
-          title: 'SMS Sent Successfully',
-          message: `Birthday SMS sent to ${contact.first_name} ${contact.last_name} (${contact.phone})`,
-          type: 'success',
-          is_read: false,
-          link: `/contacts/${contact.id}`,
-          metadata: {
-            contact_id: contact.id,
-            contact_name: `${contact.first_name} ${contact.last_name}`,
-            phone: contact.phone,
-            action: 'sms_sent',
-            message_id: data?.messageId
-          }
-        })
-
         setShowSMSDialog(false)
-        setSelectedTemplate("")
+        setSelectedSMSTemplate("")
         fetchMessageLogs()
       } else {
         console.error("❌ Termii API Error:", data?.error, data?.details)
@@ -372,24 +375,6 @@ export default function ContactDetail() {
         toast.error("SMS Failed", {
           description: data?.error || "Unknown error from Termii API",
           duration: 7000,
-        })
-
-        // 🔔 Create notification for SMS failed
-        await supabase.from('notifications').insert({
-          user_id: profile?.id,
-          title: 'SMS Failed',
-          message: `Failed to send birthday SMS to ${contact.first_name} ${contact.last_name}: ${data?.error || 'Unknown error'}`,
-          type: 'error',
-          is_read: false,
-          link: `/contacts/${contact.id}`,
-          metadata: {
-            contact_id: contact.id,
-            contact_name: `${contact.first_name} ${contact.last_name}`,
-            phone: contact.phone,
-            action: 'sms_failed',
-            error: data?.error,
-            details: data?.details
-          }
         })
 
         if (data?.details) {
@@ -405,25 +390,75 @@ export default function ContactDetail() {
         description: error.message || "Failed to connect to SMS service",
         duration: 7000,
       })
-
-      // 🔔 Create notification for SMS error
-      await supabase.from('notifications').insert({
-        user_id: profile?.id,
-        title: 'SMS Error',
-        message: `Error sending SMS to ${contact.first_name} ${contact.last_name}: ${error.message || 'Connection failed'}`,
-        type: 'error',
-        is_read: false,
-        link: `/contacts/${contact.id}`,
-        metadata: {
-          contact_id: contact.id,
-          contact_name: `${contact.first_name} ${contact.last_name}`,
-          phone: contact.phone,
-          action: 'sms_error',
-          error: error.message
-        }
-      })
     } finally {
       setIsSendingSMS(false)
+    }
+  }
+
+  const handleSendEmail = async () => {
+    if (!selectedEmailTemplate || !contact) return
+
+    if (!contact.email) {
+      toast.error("No Email Address", {
+        description: "This contact doesn't have an email address",
+      })
+      return
+    }
+
+    setIsSendingEmail(true)
+
+    try {
+      console.log("📧 Sending Email via Resend...")
+      console.log("Contact:", contact.first_name, contact.email)
+      console.log("Template:", selectedEmailTemplate)
+
+      const { data, error } = await supabase.functions.invoke("send-email", {
+        body: {
+          contactId: contact.id,
+          templateId: selectedEmailTemplate,
+          userId: profile?.id,
+        },
+      })
+
+      console.log("📡 Response from Edge Function:", data)
+
+      if (error) {
+        console.error("❌ Supabase Function Error:", error)
+        throw error
+      }
+
+      if (data?.success) {
+        toast.success("Email Sent Successfully! 🎉", {
+          description: `Birthday email sent to ${contact.first_name}`,
+          duration: 5000,
+        })
+
+        setShowEmailDialog(false)
+        setSelectedEmailTemplate("")
+        fetchMessageLogs()
+      } else {
+        console.error("❌ Resend API Error:", data?.error, data?.details)
+
+        toast.error("Email Failed", {
+          description: data?.error || "Unknown error from Resend API",
+          duration: 7000,
+        })
+
+        if (data?.details) {
+          console.log("📋 Full Resend Response:", JSON.stringify(data.details, null, 2))
+        }
+        
+        fetchMessageLogs()
+      }
+    } catch (error: any) {
+      console.error("💥 Catch Block Error:", error)
+
+      toast.error("Error Sending Email", {
+        description: error.message || "Failed to connect to email service",
+        duration: 7000,
+      })
+    } finally {
+      setIsSendingEmail(false)
     }
   }
 
@@ -469,6 +504,15 @@ export default function ContactDetail() {
         <div className="flex gap-2">
           {!isEditing ? (
             <>
+              <Button
+                onClick={() => setShowEmailDialog(true)}
+                disabled={!contact.email}
+                className="bg-blue-600 hover:bg-blue-700"
+                title={!contact.email ? "No email address" : ""}
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Send Birthday Email
+              </Button>
               <Button
                 onClick={() => setShowSMSDialog(true)}
                 className="bg-green-600 hover:bg-green-700"
@@ -725,15 +769,20 @@ export default function ContactDetail() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span
-                      className={`text-xs font-semibold px-2 py-1 rounded ${
-                        msg.status === "sent"
-                          ? "bg-green-600 text-white"
-                          : "bg-red-600 text-white"
-                      }`}
-                    >
-                      {msg.status.toUpperCase()}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-xs font-semibold px-2 py-1 rounded ${
+                          msg.status === "sent"
+                            ? "bg-green-600 text-white"
+                            : "bg-red-600 text-white"
+                        }`}
+                      >
+                        {msg.status.toUpperCase()}
+                      </span>
+                      <span className="text-xs font-semibold px-2 py-1 rounded bg-gray-200 text-gray-700 uppercase">
+                        {msg.message_type}
+                      </span>
+                    </div>
                     <span className="text-xs text-gray-500">
                       {msg.sent_at
                         ? formatDistanceToNow(new Date(msg.sent_at), {
@@ -746,14 +795,14 @@ export default function ContactDetail() {
                   </div>
 
                   <p className="text-sm text-gray-700 mb-2 bg-white p-2 rounded">
-                    {msg.content}
+                    {msg.message_type === 'email' ? (
+                      <span dangerouslySetInnerHTML={{ __html: msg.content.substring(0, 200) + '...' }} />
+                    ) : (
+                      msg.content
+                    )}
                   </p>
 
                   <div className="text-xs text-gray-600 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">Type:</span>
-                      <span className="uppercase">{msg.message_type}</span>
-                    </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">To:</span>
                       <span>{msg.recipient}</span>
@@ -777,6 +826,89 @@ export default function ContactDetail() {
         </Card>
       )}
 
+      {/* Send EMAIL Dialog */}
+      <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-blue-600" />
+              Send Birthday Email
+            </DialogTitle>
+            <DialogDescription>
+              Send a birthday email to {contact.first_name} {contact.last_name} at{" "}
+              {contact.email}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Email Template
+            </label>
+            <select
+              value={selectedEmailTemplate}
+              onChange={(e) => setSelectedEmailTemplate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">-- Select a template --</option>
+              {emailTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedEmailTemplate && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm font-medium text-gray-700 mb-2">
+                  Subject: {emailTemplates.find((t) => t.id === selectedEmailTemplate)?.subject || "Happy Birthday!"}
+                </p>
+                <p className="text-xs text-gray-600">
+                  ✉️ A beautiful HTML birthday card will be sent
+                </p>
+              </div>
+            )}
+
+            {emailTemplates.length === 0 && (
+              <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                <p className="text-sm text-orange-800">
+                  ⚠️ No email templates found. Please create an email template first in the Templates
+                  page.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowEmailDialog(false)
+                setSelectedEmailTemplate("")
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendEmail}
+              disabled={!selectedEmailTemplate || isSendingEmail}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isSendingEmail ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail className="w-4 h-4 mr-2" />
+                  Send Email
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Send SMS Dialog */}
       <Dialog open={showSMSDialog} onOpenChange={setShowSMSDialog}>
         <DialogContent>
@@ -796,24 +928,24 @@ export default function ContactDetail() {
               Select SMS Template
             </label>
             <select
-              value={selectedTemplate}
-              onChange={(e) => setSelectedTemplate(e.target.value)}
+              value={selectedSMSTemplate}
+              onChange={(e) => setSelectedSMSTemplate(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">-- Select a template --</option>
-              {templates.map((template) => (
+              {smsTemplates.map((template) => (
                 <option key={template.id} value={template.id}>
                   {template.name}
                 </option>
               ))}
             </select>
 
-            {selectedTemplate && (
+            {selectedSMSTemplate && (
               <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm font-medium text-gray-700 mb-2">Preview:</p>
                 <p className="text-sm text-gray-600">
-                  {templates
-                    .find((t) => t.id === selectedTemplate)
+                  {smsTemplates
+                    .find((t) => t.id === selectedSMSTemplate)
                     ?.content.replace(/\[FirstName\]/g, contact.first_name)
                     .replace(/\[LastName\]/g, contact.last_name)
                     .replace(/\[Name\]/g, `${contact.first_name} ${contact.last_name}`)
@@ -822,7 +954,7 @@ export default function ContactDetail() {
               </div>
             )}
 
-            {templates.length === 0 && (
+            {smsTemplates.length === 0 && (
               <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
                 <p className="text-sm text-orange-800">
                   ⚠️ No SMS templates found. Please create an SMS template first in the Templates
@@ -837,14 +969,14 @@ export default function ContactDetail() {
               variant="outline"
               onClick={() => {
                 setShowSMSDialog(false)
-                setSelectedTemplate("")
+                setSelectedSMSTemplate("")
               }}
             >
               Cancel
             </Button>
             <Button
               onClick={handleSendSMS}
-              disabled={!selectedTemplate || isSendingSMS}
+              disabled={!selectedSMSTemplate || isSendingSMS}
               className="bg-green-600 hover:bg-green-700"
             >
               {isSendingSMS ? (
