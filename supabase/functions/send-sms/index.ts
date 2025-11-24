@@ -16,10 +16,13 @@ serve(async (req) => {
     const body = await req.json();
     const { contactId, templateId, phoneNumber, userId } = body;
 
+    console.log('📥 Received request:', { contactId, templateId, phoneNumber, userId });
+
     if (!contactId || !templateId || !phoneNumber) {
+      console.error('❌ Missing required fields');
       return new Response(JSON.stringify({
         success: false,
-        error: 'Missing required fields'
+        error: 'Missing required fields: contactId, templateId, or phoneNumber'
       }), {
         status: 400,
         headers: {
@@ -35,6 +38,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Fetch contact
+    console.log('👤 Fetching contact...');
     const { data: contact, error: contactError } = await supabase
       .from('contacts')
       .select('first_name, last_name, birthday')
@@ -42,6 +46,7 @@ serve(async (req) => {
       .single();
 
     if (contactError || !contact) {
+      console.error('❌ Contact not found:', contactError);
       return new Response(JSON.stringify({
         success: false,
         error: 'Contact not found'
@@ -54,15 +59,18 @@ serve(async (req) => {
       });
     }
 
+    console.log('✅ Contact found:', contact.first_name, contact.last_name);
+
     // Fetch template
+    console.log('📄 Fetching template...');
     const { data: template, error: templateError } = await supabase
       .from('message_templates')
       .select('name, content, type')
       .eq('id', templateId)
-      .eq('type', 'sms')
       .single();
 
     if (templateError || !template) {
+      console.error('❌ Template not found:', templateError);
       return new Response(JSON.stringify({
         success: false,
         error: 'Template not found'
@@ -75,6 +83,23 @@ serve(async (req) => {
       });
     }
 
+    // Check if template is SMS type
+    if (template.type !== 'sms') {
+      console.error('❌ Template is not SMS type:', template.type);
+      return new Response(JSON.stringify({
+        success: false,
+        error: `Template is type '${template.type}', not 'sms'`
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+
+    console.log('✅ Template found:', template.name);
+
     // Calculate age
     const birthDate = new Date(contact.birthday);
     const today = new Date();
@@ -83,6 +108,8 @@ serve(async (req) => {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
+
+    console.log('🎂 Calculated age:', age);
 
     // Replace placeholders
     let messageContent = template.content
@@ -99,13 +126,17 @@ serve(async (req) => {
       .replace(/\{fullname\}/gi, `${contact.first_name} ${contact.last_name}`)
       .replace(/\{age\}/gi, age.toString());
 
+    console.log('✍️ Message content:', messageContent);
+
     // Fetch settings
+    console.log('⚙️ Fetching settings...');
     const { data: settingsData, error: settingsError } = await supabase
       .from('system_settings')
       .select('setting_key, setting_value')
       .in('setting_key', ['termii_api_key', 'termii_sender_id', 'enable_sms']);
 
     if (settingsError || !settingsData) {
+      console.error('❌ Settings not found:', settingsError);
       return new Response(JSON.stringify({
         success: false,
         error: 'Settings not found'
@@ -123,10 +154,17 @@ serve(async (req) => {
       settings[item.setting_key] = item.setting_value;
     });
 
+    console.log('⚙️ Settings loaded:', {
+      has_api_key: !!settings.termii_api_key,
+      sender_id: settings.termii_sender_id,
+      sms_enabled: settings.enable_sms
+    });
+
     if (settings.enable_sms !== 'true') {
+      console.error('❌ SMS is disabled');
       return new Response(JSON.stringify({
         success: false,
-        error: 'SMS is disabled'
+        error: 'SMS is disabled in system settings'
       }), {
         status: 200,
         headers: {
@@ -137,6 +175,7 @@ serve(async (req) => {
     }
 
     if (!settings.termii_api_key) {
+      console.error('❌ Termii API key not configured');
       return new Response(JSON.stringify({
         success: false,
         error: 'Termii API key not configured'
@@ -150,56 +189,76 @@ serve(async (req) => {
     }
 
     // Send SMS via Termii
-    console.log('🔥 Sending SMS to Termii...');
-    console.log('Phone:', phoneNumber);
-    console.log('Message:', messageContent);
+    console.log('📤 Sending SMS to Termii...');
+    console.log('📱 Phone:', phoneNumber);
+    console.log('💬 Message:', messageContent);
+
+    const termiiPayload = {
+      to: phoneNumber,
+      from: settings.termii_sender_id || 'BirthdayBot',
+      sms: messageContent,
+      type: 'plain',
+      channel: 'generic',
+      api_key: settings.termii_api_key
+    };
+
+    console.log('📦 Termii payload:', { ...termiiPayload, api_key: '***hidden***' });
 
     const termiiResponse = await fetch('https://api.ng.termii.com/api/sms/send', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        to: phoneNumber,
-        from: settings.termii_sender_id || 'BirthdayBot',
-        sms: messageContent,
-        type: 'plain',
-        channel: 'generic',
-        api_key: settings.termii_api_key
-      })
+      body: JSON.stringify(termiiPayload)
     });
 
     const termiiData = await termiiResponse.json();
-    console.log('📡 Termii Response:', termiiData);
+    console.log('📡 Termii Response Status:', termiiResponse.status);
+    console.log('📡 Termii Response Data:', JSON.stringify(termiiData, null, 2));
 
-    // 🔥 CRITICAL FIX: Check ACTUAL Termii response, not just HTTP status
+    // 🔥 CRITICAL: Check ACTUAL Termii response
     let status = 'failed';
     let errorMessage = null;
     let isSuccess = false;
 
     if (termiiResponse.ok && termiiData.message_id) {
       // Success: Has message_id
+      console.log('✅ SUCCESS: SMS sent with message_id:', termiiData.message_id);
       status = 'sent';
       isSuccess = true;
-    } else if (termiiData.code === 'ok' && termiiData.balance === '0') {
+    } else if (termiiData.balance === '0' || termiiData.balance === 0) {
       // No credit
+      console.log('❌ FAILED: Insufficient SMS credit');
       status = 'failed';
-      errorMessage = 'Insufficient SMS credit';
+      errorMessage = 'Insufficient SMS credit (balance: 0)';
     } else if (termiiData.message) {
       // Termii error message
+      console.log('❌ FAILED: Termii error -', termiiData.message);
       status = 'failed';
       errorMessage = termiiData.message;
+    } else if (termiiData.error) {
+      // Alternative error format
+      console.log('❌ FAILED: Termii error -', termiiData.error);
+      status = 'failed';
+      errorMessage = typeof termiiData.error === 'string' ? termiiData.error : JSON.stringify(termiiData.error);
+    } else if (!termiiResponse.ok) {
+      // HTTP error
+      console.log('❌ FAILED: HTTP error', termiiResponse.status);
+      status = 'failed';
+      errorMessage = `HTTP ${termiiResponse.status}: ${JSON.stringify(termiiData)}`;
     } else {
       // Unknown error
+      console.log('❌ FAILED: Unknown error');
       status = 'failed';
-      errorMessage = 'Unknown error from Termii';
+      errorMessage = 'Unknown error from Termii (no message_id received)';
     }
 
-    console.log('✅ Final Status:', status);
-    console.log('✅ Is Success:', isSuccess);
+    console.log('🎯 Final Status:', status);
+    console.log('🎯 Is Success:', isSuccess);
 
     // Log to message_logs
-    await supabase.from('message_logs').insert({
+    console.log('💾 Saving to message_logs...');
+    const { error: logError } = await supabase.from('message_logs').insert({
       contact_id: contactId,
       template_id: templateId,
       message_type: 'sms',
@@ -210,10 +269,16 @@ serve(async (req) => {
       sent_at: isSuccess ? new Date().toISOString() : null
     });
 
-    // 🔔 Create notification
+    if (logError) {
+      console.error('⚠️ Failed to save message log:', logError);
+    } else {
+      console.log('✅ Message log saved');
+    }
+
+    // 🔔 Create notification (only if userId is provided)
     if (userId) {
+      console.log('🔔 Creating notification for user:', userId);
       if (isSuccess) {
-        // Success notification
         await supabase.from('notifications').insert({
           user_id: userId,
           title: 'SMS Sent Successfully',
@@ -230,11 +295,10 @@ serve(async (req) => {
           }
         });
       } else {
-        // Failed notification
         await supabase.from('notifications').insert({
           user_id: userId,
           title: 'SMS Failed',
-          message: `Failed to send SMS to ${contact.first_name} ${contact.last_name}: ${errorMessage || 'Unknown error'}`,
+          message: `Failed to send SMS to ${contact.first_name} ${contact.last_name}: ${errorMessage}`,
           type: 'error',
           is_read: false,
           link: `/contacts/${contactId}`,
@@ -248,10 +312,11 @@ serve(async (req) => {
           }
         });
       }
+      console.log('✅ Notification created');
     }
 
     // Return response
-    return new Response(JSON.stringify({
+    const response = {
       success: isSuccess,
       message: isSuccess ? 'SMS sent successfully' : (errorMessage || 'Failed to send SMS'),
       error: isSuccess ? null : errorMessage,
@@ -260,7 +325,11 @@ serve(async (req) => {
       recipient: phoneNumber,
       contact: `${contact.first_name} ${contact.last_name}`,
       messageContent: messageContent
-    }), {
+    };
+
+    console.log('📤 Returning response:', response);
+
+    return new Response(JSON.stringify(response), {
       status: 200,
       headers: {
         ...corsHeaders,
@@ -268,7 +337,7 @@ serve(async (req) => {
       }
     });
   } catch (error) {
-    console.error('💥 Error:', error);
+    console.error('💥 Fatal Error:', error);
     return new Response(JSON.stringify({
       success: false,
       error: error.message
