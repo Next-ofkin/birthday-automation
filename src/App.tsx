@@ -18,6 +18,8 @@ import BulkUpload from "./pages/BulkUpload"
 import Analytics from "./pages/Analytics"
 import Notifications from "./pages/Notifications"
 import Settings from "./pages/Settings"
+import UserManagement from "./pages/UserManagement"
+
 
 // Component to handle password recovery redirect
 function PasswordRecoveryHandler() {
@@ -148,7 +150,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          
+
           {/* Protected routes without Layout (if intentional) */}
           <Route
             path="/test-rls"
@@ -163,6 +165,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <DebugRLS />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute requiredRole={['developer', 'admin']}>
+                <Layout>
+                  <UserManagement />
+                </Layout>
               </ProtectedRoute>
             }
           />

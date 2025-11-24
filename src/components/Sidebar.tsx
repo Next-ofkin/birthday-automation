@@ -41,6 +41,12 @@ export function Sidebar() {
       roles: ["developer", "admin", "customer_service", "user"]
     },
     {
+      name: "User Management",
+      path: "/users",
+      icon: <Users className="w-5 h-5" />,
+      roles: ["developer", "admin"]
+    },
+    {
       name: "Templates",
       path: "/templates",
       icon: <MessageSquare className="w-5 h-5" />,

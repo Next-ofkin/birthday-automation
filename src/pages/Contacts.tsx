@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Search, Plus, Calendar, Mail, Phone, Tag, Pencil, Trash2 } from "lucide-react"
 import { useAuth } from "@/context/AuthContext"
-import { useNavigate } from "react-router-dom"  // Add if not already there
+import { useNavigate } from "react-router-dom"
 
 interface Contact {
     id: string
@@ -37,6 +37,7 @@ interface ContactFormData {
 
 export default function Contacts() {
     const { profile } = useAuth()
+    const navigate = useNavigate()
     const [contacts, setContacts] = useState<Contact[]>([])
     const [filteredContacts, setFilteredContacts] = useState<Contact[]>([])
     const [searchQuery, setSearchQuery] = useState("")
@@ -44,7 +45,6 @@ export default function Contacts() {
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [editingContact, setEditingContact] = useState<Contact | null>(null)
     const [isSaving, setIsSaving] = useState(false)
-    const navigate = useNavigate()  // Add near the top of the component
     const [formData, setFormData] = useState<ContactFormData>({
         first_name: "",
         last_name: "",
@@ -203,13 +203,50 @@ export default function Contacts() {
                     .eq('id', editingContact.id)
 
                 if (error) throw error
+
+                // 📝 Log activity
+                await supabase.from('activity_logs').insert({
+                    user_id: profile?.id,
+                    action_type: 'contact_updated',
+                    action_description: `Updated contact: ${formData.first_name} ${formData.last_name}`,
+                    entity_type: 'contact',
+                    entity_id: editingContact.id
+                })
             } else {
                 // Create
-                const { error } = await supabase
+                const { data: newContact, error } = await supabase
                     .from('contacts')
                     .insert([contactData])
+                    .select()
+                    .single()
 
                 if (error) throw error
+
+                // 📝 Log activity
+                if (newContact) {
+                    await supabase.from('activity_logs').insert({
+                        user_id: profile?.id,
+                        action_type: 'contact_created',
+                        action_description: `Created new contact: ${formData.first_name} ${formData.last_name}`,
+                        entity_type: 'contact',
+                        entity_id: newContact.id
+                    })
+
+                    // 🔔 Create notification for new contact
+                    await supabase.from('notifications').insert({
+                        user_id: profile?.id,
+                        title: 'New Contact Added',
+                        message: `${formData.first_name} ${formData.last_name} has been added to your contacts`,
+                        type: 'success',
+                        is_read: false,
+                        link: `/contacts/${newContact.id}`,
+                        metadata: {
+                            contact_id: newContact.id,
+                            contact_name: `${formData.first_name} ${formData.last_name}`,
+                            action: 'contact_created'
+                        }
+                    })
+                }
             }
 
             // Refresh list
@@ -223,7 +260,7 @@ export default function Contacts() {
         }
     }
 
-    const handleDelete = async (contactId: string) => {
+    const handleDelete = async (contactId: string, contactName: string) => {
         try {
             const { error } = await supabase
                 .from('contacts')
@@ -231,6 +268,29 @@ export default function Contacts() {
                 .eq('id', contactId)
 
             if (error) throw error
+
+            // 📝 Log activity
+            await supabase.from('activity_logs').insert({
+                user_id: profile?.id,
+                action_type: 'contact_deleted',
+                action_description: `Deleted contact: ${contactName}`,
+                entity_type: 'contact',
+                entity_id: contactId
+            })
+
+            // 🔔 Create notification for deleted contact
+            await supabase.from('notifications').insert({
+                user_id: profile?.id,
+                title: 'Contact Deleted',
+                message: `${contactName} has been removed from your contacts`,
+                type: 'info',
+                is_read: false,
+                metadata: {
+                    contact_id: contactId,
+                    contact_name: contactName,
+                    action: 'contact_deleted'
+                }
+            })
 
             // Refresh list
             await fetchContacts()
@@ -582,7 +642,7 @@ export default function Contacts() {
                                                                 <AlertDialogFooter>
                                                                     <AlertDialogCancel>Cancel</AlertDialogCancel>
                                                                     <AlertDialogAction
-                                                                        onClick={() => handleDelete(contact.id)}
+                                                                        onClick={() => handleDelete(contact.id, `${contact.first_name} ${contact.last_name}`)}
                                                                         className="bg-red-600 hover:bg-red-700"
                                                                     >
                                                                         Delete

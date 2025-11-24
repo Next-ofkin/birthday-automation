@@ -1,18 +1,19 @@
-import { Navigate } from 'react-router-dom'
-import { useAuth } from '@/context/AuthContext'
+import { Navigate } from "react-router-dom"
+import { useAuth } from "@/context/AuthContext"
 
 interface ProtectedRouteProps {
   children: React.ReactNode
+  requiredRole?: string[]
 }
 
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, loading } = useAuth()
+export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+  const { user, profile, loading } = useAuth()
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
-        <div className="bg-white rounded-lg shadow-2xl p-8 max-w-md w-full text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading...</p>
         </div>
       </div>
@@ -21,6 +22,14 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!user) {
     return <Navigate to="/login" replace />
+  }
+
+  // Check if user has required role
+  if (requiredRole && profile) {
+    if (!requiredRole.includes(profile.role)) {
+      // Redirect to dashboard if user doesn't have required role
+      return <Navigate to="/dashboard" replace />
+    }
   }
 
   return <>{children}</>
