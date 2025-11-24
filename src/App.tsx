@@ -12,14 +12,14 @@ import { useEffect } from "react"
 import { supabase } from "./lib/supabase"
 import { Layout } from "./components/Layout"
 import Contacts from "./pages/Contacts"
-import ContactDetail from "./pages/ContactDetail" // Add this import
+import ContactDetail from "./pages/ContactDetail"
 import Templates from "./pages/Templates"
 import BulkUpload from "./pages/BulkUpload"
 import Analytics from "./pages/Analytics"
 import Notifications from "./pages/Notifications"
 import Settings from "./pages/Settings"
 import UserManagement from "./pages/UserManagement"
-
+import MessageHistory from "./pages/MessageHistory"
 
 // Component to handle password recovery redirect
 function PasswordRecoveryHandler() {
@@ -131,6 +131,16 @@ function App() {
             }
           />
           <Route
+            path="/messages"
+            element={
+              <ProtectedRoute requiredRole={['developer', 'admin']}>
+                <Layout>
+                  <MessageHistory />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/notifications"
             element={
               <ProtectedRoute>
@@ -150,6 +160,16 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute requiredRole={['developer', 'admin']}>
+                <Layout>
+                  <UserManagement />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
 
           {/* Protected routes without Layout (if intentional) */}
           <Route
@@ -165,16 +185,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <DebugRLS />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users"
-            element={
-              <ProtectedRoute requiredRole={['developer', 'admin']}>
-                <Layout>
-                  <UserManagement />
-                </Layout>
               </ProtectedRoute>
             }
           />

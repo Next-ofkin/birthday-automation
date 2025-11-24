@@ -10,7 +10,8 @@ import {
   Bell,
   LogOut,
   Menu,
-  X
+  X,
+  Send  // ← ADD THIS
 } from "lucide-react"
 import { Button } from "./ui/button"
 import { useState } from "react"
@@ -64,6 +65,14 @@ export function Sidebar() {
       icon: <BarChart3 className="w-5 h-5" />,
       roles: ["developer", "admin"]
     },
+    // ← ADD THIS NEW ITEM HERE
+    {
+      name: "Message History",
+      path: "/messages",
+      icon: <Send className="w-5 h-5" />,
+      roles: ["developer", "admin"]
+    },
+    // ← END OF NEW ITEM
     {
       name: "Notifications",
       path: "/notifications",
