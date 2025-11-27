@@ -8,7 +8,6 @@ import { useNavigate } from "react-router-dom"
 import { 
   Upload, 
   CheckCircle, 
-  XCircle, 
   AlertCircle,
   Download,
   Loader2,
@@ -828,12 +827,29 @@ export default function BulkUpload() {
   }
 
   const toggleDuplicateUpload = (index: number) => {
-    const actualIndex = (currentPage - 1) * itemsPerPage + index
+    // Get the actual contact from the filtered data
+    const contact = paginatedData[index]
+    if (!contact) return
+    
+    // Find the original index in the full parsedData array
+    const originalIndex = parsedData.findIndex(c => 
+      c.row === contact.row && 
+      c.first_name === contact.first_name && 
+      c.last_name === contact.last_name
+    )
+    
+    if (originalIndex === -1) return
+    
+    // Create a new array and toggle the skipUpload status
     const newData = [...parsedData]
-    newData[actualIndex].skipUpload = !newData[actualIndex].skipUpload
+    newData[originalIndex] = {
+      ...newData[originalIndex],
+      skipUpload: !newData[originalIndex].skipUpload
+    }
     
     setParsedData(newData)
     
+    // Recalculate stats
     const validContacts = newData.filter(c => c.isValid)
     const skippedDuplicates = validContacts.filter(c => c.isDuplicate && c.skipUpload)
     const uploadableDuplicates = validContacts.filter(c => c.isDuplicate && !c.skipUpload)
@@ -844,6 +860,17 @@ export default function BulkUpload() {
       newContacts: newContactsCount + uploadableDuplicates.length,
       skippedByUser: skippedDuplicates.length
     }))
+
+    // Show feedback
+    if (newData[originalIndex].skipUpload) {
+      toast.info('Duplicate Skipped', {
+        description: `${contact.first_name} ${contact.last_name} will be skipped from upload`
+      })
+    } else {
+      toast.info('Duplicate Included', {
+        description: `${contact.first_name} ${contact.last_name} will be included in upload`
+      })
+    }
   }
 
   const confirmUpload = async () => {
@@ -982,7 +1009,7 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
     return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">Ready</span>
   }
 
-  const getBadgeClass = (count: number, type: string) => {
+  const getBadgeClass = (type: string) => {
     const baseClass = "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
     switch (type) {
       case 'valid': return `${baseClass} bg-green-100 text-green-800`
@@ -1314,7 +1341,7 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
                       `}
                     >
                       {tab.label}
-                      <span className={getBadgeClass(tab.count, tab.id)}>
+                      <span className={getBadgeClass(tab.id)}>
                         {tab.count}
                       </span>
                     </button>
