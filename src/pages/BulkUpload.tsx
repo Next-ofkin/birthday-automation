@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/context/AuthContext"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,9 @@ import {
   Link as LinkIcon,
   RefreshCw,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Filter,
+  Search
 } from "lucide-react"
 import Papa from "papaparse"
 import * as XLSX from 'xlsx'
@@ -55,6 +57,8 @@ interface UploadStats {
   skippedByUser: number
 }
 
+type ViewMode = 'all' | 'valid' | 'invalid' | 'duplicates' | 'ready'
+
 export default function BulkUpload() {
   const { profile } = useAuth()
   const navigate = useNavigate()
@@ -80,15 +84,12 @@ export default function BulkUpload() {
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false)
   const [showUploadDialog, setShowUploadDialog] = useState(false)
   const [showClearDialog, setShowClearDialog] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('all')
+  const [searchTerm, setSearchTerm] = useState('')
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
-  const totalPages = Math.ceil(parsedData.length / itemsPerPage)
-  const paginatedData = parsedData.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  )
 
   // Check permissions
   const canUpload = ['developer', 'admin', 'customer_service'].includes(profile?.role || '')
@@ -97,6 +98,45 @@ export default function BulkUpload() {
     navigate('/dashboard')
     return null
   }
+
+  // Filter data based on view mode and search
+  const filteredData = parsedData.filter(contact => {
+    // Search filter
+    const searchLower = searchTerm.toLowerCase()
+    const matchesSearch = !searchTerm || 
+      contact.first_name.toLowerCase().includes(searchLower) ||
+      contact.last_name.toLowerCase().includes(searchLower) ||
+      contact.email.toLowerCase().includes(searchLower) ||
+      contact.phone.includes(searchTerm)
+
+    if (!matchesSearch) return false
+
+    // View mode filter
+    switch (viewMode) {
+      case 'valid':
+        return contact.isValid && !contact.isDuplicate
+      case 'invalid':
+        return !contact.isValid
+      case 'duplicates':
+        return contact.isDuplicate
+      case 'ready':
+        return contact.isValid && !contact.skipUpload
+      case 'all':
+      default:
+        return true
+    }
+  })
+
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage)
+  const paginatedData = filteredData.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  )
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [viewMode, searchTerm])
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -321,6 +361,8 @@ export default function BulkUpload() {
     setUploadComplete(false)
     setUploadResult(null)
     setCurrentPage(1)
+    setViewMode('all')
+    setSearchTerm('')
   }
 
   const confirmClearAll = () => {
@@ -428,6 +470,7 @@ export default function BulkUpload() {
     
     console.log('🔢 Original phone input:', phoneInput)
     
+    // Handle scientific notation
     if (phoneStr.includes('E') || phoneStr.includes('e')) {
       console.log('⚠️ Detected scientific notation:', phoneStr)
       
@@ -459,21 +502,125 @@ export default function BulkUpload() {
       }
     }
     
+    // Remove all non-digit characters except +
     phoneStr = phoneStr.replace(/[^\d+]/g, '')
     
-    if (phoneStr.startsWith('+')) {
-      phoneStr = '+' + phoneStr.substring(1).replace(/^0+/, '')
-    } else {
-      phoneStr = phoneStr.replace(/^0+/, '')
-    }
-    
-    if (phoneStr && !phoneStr.startsWith('+')) {
+    // Handle Nigerian phone numbers specifically
+    if (phoneStr.startsWith('0')) {
+      // Convert 080... to +23480...
+      phoneStr = '+234' + phoneStr.substring(1)
+    } else if (phoneStr.startsWith('80') || phoneStr.startsWith('81') || phoneStr.startsWith('70') || phoneStr.startsWith('90')) {
+      // Convert 80..., 81..., 70..., 90... to +23480..., +23481..., etc.
+      phoneStr = '+234' + phoneStr
+    } else if (phoneStr.startsWith('234') && !phoneStr.startsWith('+')) {
+      // Convert 234... to +234...
+      phoneStr = '+' + phoneStr
+    } else if (!phoneStr.startsWith('+') && phoneStr.length > 0) {
+      // Add + if missing and it's not empty
       phoneStr = '+' + phoneStr
     }
+    
+    // Remove any extra + signs
+    phoneStr = phoneStr.replace(/^\++/g, '+')
     
     console.log('📱 Final phone:', phoneStr)
     
     return phoneStr
+  }
+
+  const parseBirthday = (birthdayInput: any): string => {
+    if (!birthdayInput) return ''
+    
+    let birthdayStr = birthdayInput.toString().trim()
+    
+    console.log('🎂 Original birthday input:', birthdayInput)
+    
+    // Handle Excel serial numbers
+    if (!isNaN(Number(birthdayStr)) && birthdayStr.length > 4) {
+      const serialNumber = Number(birthdayStr)
+      if (serialNumber > 0 && serialNumber < 100000) {
+        try {
+          const excelEpoch = new Date(1899, 11, 30)
+          const jsDate = new Date(excelEpoch.getTime() + serialNumber * 24 * 60 * 60 * 1000)
+          const year = jsDate.getFullYear()
+          const month = String(jsDate.getMonth() + 1).padStart(2, '0')
+          const day = String(jsDate.getDate()).padStart(2, '0')
+          return `${year}-${month}-${day}`
+        } catch (e) {
+          console.error('Date conversion error:', e)
+        }
+      }
+    }
+    
+    // Handle date strings in various formats
+    const dateFormats = [
+      // YYYY-MM-DD (already correct)
+      /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+      // DD-MM-YYYY
+      /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
+      // MM-DD-YYYY
+      /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
+      // DD/MM/YYYY
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+      // MM/DD/YYYY
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+      // YYYY/MM/DD
+      /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/
+    ]
+    
+    for (const format of dateFormats) {
+      const match = birthdayStr.match(format)
+      if (match) {
+        let year, month, day
+        
+        if (format.source.includes('^\\d{4}')) {
+          // YYYY first formats
+          year = match[1]
+          month = match[2].padStart(2, '0')
+          day = match[3].padStart(2, '0')
+        } else {
+          // DD/MM/YYYY or MM/DD/YYYY formats
+          const firstPart = parseInt(match[1])
+          const secondPart = parseInt(match[2])
+          
+          // Determine if it's DD-MM-YYYY or MM-DD-YYYY
+          if (firstPart > 12) {
+            // First part is day (DD-MM-YYYY)
+            day = match[1].padStart(2, '0')
+            month = match[2].padStart(2, '0')
+            year = match[3]
+          } else if (secondPart > 12) {
+            // Second part is day (MM-DD-YYYY)
+            month = match[1].padStart(2, '0')
+            day = match[2].padStart(2, '0')
+            year = match[3]
+          } else {
+            // Ambiguous case, assume MM-DD-YYYY
+            month = match[1].padStart(2, '0')
+            day = match[2].padStart(2, '0')
+            year = match[3]
+          }
+        }
+        
+        // Validate the date
+        const date = new Date(`${year}-${month}-${day}`)
+        if (!isNaN(date.getTime()) && date.getFullYear().toString() === year) {
+          console.log('✅ Parsed birthday:', `${year}-${month}-${day}`)
+          return `${year}-${month}-${day}`
+        }
+      }
+    }
+    
+    // Try parsing as Date object
+    if (birthdayInput instanceof Date) {
+      const year = birthdayInput.getFullYear()
+      const month = String(birthdayInput.getMonth() + 1).padStart(2, '0')
+      const day = String(birthdayInput.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    
+    console.log('❌ Could not parse birthday:', birthdayStr)
+    return birthdayStr
   }
 
   const checkForDuplicates = async (contacts: ParsedContact[]): Promise<ParsedContact[]> => {
@@ -589,34 +736,8 @@ export default function BulkUpload() {
         errors.push('Phone is required')
       }
 
-      let birthdayStr = ''
-      if (row.birthday) {
-        if (row.birthday instanceof Date) {
-          const year = row.birthday.getFullYear()
-          const month = String(row.birthday.getMonth() + 1).padStart(2, '0')
-          const day = String(row.birthday.getDate()).padStart(2, '0')
-          birthdayStr = `${year}-${month}-${day}`
-        } else {
-          birthdayStr = row.birthday.toString().trim()
-          
-          if (!isNaN(Number(birthdayStr))) {
-            const serialNumber = Number(birthdayStr)
-            if (serialNumber > 0 && serialNumber < 100000) {
-              try {
-                const excelEpoch = new Date(1899, 11, 30)
-                const jsDate = new Date(excelEpoch.getTime() + serialNumber * 24 * 60 * 60 * 1000)
-                const year = jsDate.getFullYear()
-                const month = String(jsDate.getMonth() + 1).padStart(2, '0')
-                const day = String(jsDate.getDate()).padStart(2, '0')
-                birthdayStr = `${year}-${month}-${day}`
-              } catch (e) {
-                console.error('Date conversion error:', e)
-              }
-            }
-          }
-        }
-      }
-
+      const birthdayStr = parseBirthday(row.birthday)
+      
       if (!birthdayStr) {
         errors.push('Birthday is required')
       } else {
@@ -846,6 +967,30 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
     setFile(null)
     setFileUrl('')
     resetPreviewData()
+  }
+
+  const getStatusBadge = (contact: ParsedContact) => {
+    if (!contact.isValid) {
+      return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Invalid</span>
+    }
+    if (contact.isDuplicate && contact.skipUpload) {
+      return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Skipped</span>
+    }
+    if (contact.isDuplicate) {
+      return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">Duplicate</span>
+    }
+    return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">Ready</span>
+  }
+
+  const getBadgeClass = (count: number, type: string) => {
+    const baseClass = "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
+    switch (type) {
+      case 'valid': return `${baseClass} bg-green-100 text-green-800`
+      case 'invalid': return `${baseClass} bg-red-100 text-red-800`
+      case 'duplicates': return `${baseClass} bg-orange-100 text-orange-800`
+      case 'ready': return `${baseClass} bg-purple-100 text-purple-800`
+      default: return `${baseClass} bg-gray-100 text-gray-800`
+    }
   }
 
   return (
@@ -1093,9 +1238,9 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>👁️ Preview Data ({parsedData.length} rows)</CardTitle>
+                  <CardTitle>Contact Preview</CardTitle>
                   <CardDescription>
-                    {stats.newContacts} ready • {stats.existingContacts} duplicates • {stats.invalid} invalid
+                    Review and manage your contacts before uploading
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -1128,6 +1273,56 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
               </div>
             </CardHeader>
             <CardContent>
+              {/* Filter Controls */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                    <Input
+                      placeholder="Search contacts by name, email, or phone..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Filter className="w-4 h-4 text-gray-500 mt-2" />
+                  <span className="text-sm text-gray-600 mt-2">Filter:</span>
+                </div>
+              </div>
+
+              {/* Custom Tabs for different views */}
+              <div className="border-b border-gray-200 mb-6">
+                <nav className="-mb-px flex space-x-8">
+                  {[
+                    { id: 'all', label: 'All', count: parsedData.length },
+                    { id: 'valid', label: 'Valid', count: stats.valid },
+                    { id: 'invalid', label: 'Invalid', count: stats.invalid },
+                    { id: 'duplicates', label: 'Duplicates', count: stats.existingContacts },
+                    { id: 'ready', label: 'Ready', count: stats.newContacts },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setViewMode(tab.id as ViewMode)}
+                      className={`
+                        whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2
+                        ${viewMode === tab.id
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }
+                      `}
+                    >
+                      {tab.label}
+                      <span className={getBadgeClass(tab.count, tab.id)}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+
+              {/* Contact Table */}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
@@ -1143,63 +1338,63 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {paginatedData.map((contact, index) => (
-                      <tr key={index} className={
-                        !contact.isValid ? 'bg-red-50' : 
-                        contact.isDuplicate && contact.skipUpload ? 'bg-gray-100' :
-                        contact.isDuplicate ? 'bg-orange-50' : 
-                        'bg-green-50'
-                      }>
-                        <td className="px-4 py-3 text-gray-600">{contact.row}</td>
-                        <td className="px-4 py-3">
-                          {!contact.isValid ? (
-                            <XCircle className="w-5 h-5 text-red-600" />
-                          ) : contact.isDuplicate && contact.skipUpload ? (
-                            <XCircle className="w-5 h-5 text-gray-600" />
-                          ) : contact.isDuplicate ? (
-                            <Shield className="w-5 h-5 text-orange-600" />
-                          ) : (
-                            <CheckCircle className="w-5 h-5 text-green-600" />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {contact.isDuplicate && contact.isValid && (
-                            <Button
-                              size="sm"
-                              variant={contact.skipUpload ? "outline" : "default"}
-                              onClick={() => toggleDuplicateUpload(index)}
-                              className={contact.skipUpload ? "" : "bg-orange-600 hover:bg-orange-700"}
-                            >
-                              {contact.skipUpload ? "Include" : "Skip"}
-                            </Button>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">
-                          {contact.first_name} {contact.last_name}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">{contact.email || '-'}</td>
-                        <td className="px-4 py-3 text-gray-900">{contact.phone}</td>
-                        <td className="px-4 py-3 text-gray-900">{contact.birthday}</td>
-                        <td className="px-4 py-3">
-                          {!contact.isValid ? (
-                            <ul className="text-xs text-red-600 list-disc list-inside">
-                              {contact.errors.map((error, i) => (
-                                <li key={i}>{error}</li>
-                              ))}
-                            </ul>
-                          ) : contact.isDuplicate ? (
-                            <div className="text-xs">
-                              <div className={`font-medium ${contact.skipUpload ? 'text-gray-600' : 'text-orange-600'}`}>
-                                {contact.skipUpload ? '⊗ Will Skip' : '⚠ Duplicate'}
-                              </div>
-                              <div className="text-gray-600">{contact.duplicateReason}</div>
-                            </div>
-                          ) : (
-                            <span className="text-green-600 text-xs font-medium">✓ Ready</span>
-                          )}
+                    {paginatedData.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                          No contacts found matching your criteria.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      paginatedData.map((contact, index) => (
+                        <tr key={index} className={
+                          !contact.isValid ? 'bg-red-50' : 
+                          contact.isDuplicate && contact.skipUpload ? 'bg-gray-100' :
+                          contact.isDuplicate ? 'bg-orange-50' : 
+                          'bg-green-50'
+                        }>
+                          <td className="px-4 py-3 text-gray-600">{contact.row}</td>
+                          <td className="px-4 py-3">
+                            {getStatusBadge(contact)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {contact.isDuplicate && contact.isValid && (
+                              <Button
+                                size="sm"
+                                variant={contact.skipUpload ? "outline" : "default"}
+                                onClick={() => toggleDuplicateUpload(index)}
+                                className={contact.skipUpload ? "" : "bg-orange-600 hover:bg-orange-700"}
+                              >
+                                {contact.skipUpload ? "Include" : "Skip"}
+                              </Button>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {contact.first_name} {contact.last_name}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">{contact.email || '-'}</td>
+                          <td className="px-4 py-3 text-gray-900">{contact.phone}</td>
+                          <td className="px-4 py-3 text-gray-900">{contact.birthday}</td>
+                          <td className="px-4 py-3">
+                            {!contact.isValid ? (
+                              <ul className="text-xs text-red-600 list-disc list-inside">
+                                {contact.errors.map((error, i) => (
+                                  <li key={i}>{error}</li>
+                                ))}
+                              </ul>
+                            ) : contact.isDuplicate ? (
+                              <div className="text-xs">
+                                <div className={`font-medium ${contact.skipUpload ? 'text-gray-600' : 'text-orange-600'}`}>
+                                  {contact.skipUpload ? '⊗ Will Skip' : '⚠ Duplicate'}
+                                </div>
+                                <div className="text-gray-600">{contact.duplicateReason}</div>
+                              </div>
+                            ) : (
+                              <span className="text-green-600 text-xs font-medium">✓ Ready to upload</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1208,7 +1403,7 @@ Jane,Smith,jane.smith@example.com,+2348087654321,1985-12-25,Family member`
               {totalPages > 1 && (
                 <div className="mt-6 flex items-center justify-between">
                   <div className="text-sm text-gray-600">
-                    Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, parsedData.length)} of {parsedData.length} contacts
+                    Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredData.length)} of {filteredData.length} contacts
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
