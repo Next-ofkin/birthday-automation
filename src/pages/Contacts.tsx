@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
-import { Search, Plus, Calendar, Mail, Phone, Tag, Pencil, Trash2 } from "lucide-react"
+import { Search, Plus, Calendar, Mail, Phone, Tag, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import { useAuth } from "@/context/AuthContext"
 import { useNavigate } from "react-router-dom"
 
@@ -35,11 +35,17 @@ interface ContactFormData {
     is_active: boolean
 }
 
+interface PaginationState {
+    page: number
+    pageSize: number
+    totalCount: number
+    totalPages: number
+}
+
 export default function Contacts() {
     const { profile } = useAuth()
     const navigate = useNavigate()
     const [contacts, setContacts] = useState<Contact[]>([])
-    const [filteredContacts, setFilteredContacts] = useState<Contact[]>([])
     const [searchQuery, setSearchQuery] = useState("")
     const [isLoading, setIsLoading] = useState(true)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -63,23 +69,82 @@ export default function Contacts() {
         upcomingBirthdays: 0
     })
 
+    // Pagination state
+    const [pagination, setPagination] = useState<PaginationState>({
+        page: 1,
+        pageSize: 50, // Default page size
+        totalCount: 0,
+        totalPages: 0
+    })
+
+    // Search and filter state
+    const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null)
+
     const canEdit = ['developer', 'admin', 'customer_service'].includes(profile?.role || '')
+
+    // Page size options
+    const pageSizeOptions = [10, 25, 50, 100, 250]
 
     useEffect(() => {
         fetchContacts()
-    }, [])
+        fetchTotalCount()
+    }, [pagination.page, pagination.pageSize])
 
     useEffect(() => {
-        filterContacts()
-    }, [searchQuery, contacts])
+        // Debounced search
+        if (searchTimeout) {
+            clearTimeout(searchTimeout)
+        }
+
+        if (searchQuery.trim()) {
+            const timeout = setTimeout(() => {
+                handleSearch()
+            }, 500) // 500ms debounce
+            setSearchTimeout(timeout)
+        } else {
+            // If search query is empty, fetch normal paginated results
+            fetchContacts()
+        }
+
+        return () => {
+            if (searchTimeout) {
+                clearTimeout(searchTimeout)
+            }
+        }
+    }, [searchQuery])
+
+    const fetchTotalCount = async () => {
+        try {
+            const { count, error } = await supabase
+                .from('contacts')
+                .select('*', { count: 'exact', head: true })
+
+            if (error) throw error
+
+            setStats(prev => ({ ...prev, total: count || 0 }))
+            setPagination(prev => ({
+                ...prev,
+                totalCount: count || 0,
+                totalPages: Math.ceil((count || 0) / prev.pageSize)
+            }))
+        } catch (error) {
+            console.error('Error fetching total count:', error)
+        }
+    }
 
     const fetchContacts = async () => {
         setIsLoading(true)
         try {
-            const { data, error } = await supabase
+            const from = (pagination.page - 1) * pagination.pageSize
+            const to = from + pagination.pageSize - 1
+
+            let query = supabase
                 .from('contacts')
                 .select('*')
                 .order('created_at', { ascending: false })
+                .range(from, to)
+
+            const { data, error } = await query
 
             if (error) throw error
 
@@ -87,6 +152,37 @@ export default function Contacts() {
             calculateStats(data || [])
         } catch (error) {
             console.error('Error fetching contacts:', error)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleSearch = async () => {
+        if (!searchQuery.trim()) {
+            fetchContacts()
+            return
+        }
+
+        setIsLoading(true)
+        try {
+            const from = (pagination.page - 1) * pagination.pageSize
+            const to = from + pagination.pageSize - 1
+
+            let query = supabase
+                .from('contacts')
+                .select('*')
+                .or(`first_name.ilike.%${searchQuery}%,last_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%`)
+                .order('created_at', { ascending: false })
+                .range(from, to)
+
+            const { data, error } = await query
+
+            if (error) throw error
+
+            setContacts(data || [])
+            calculateStats(data || [])
+        } catch (error) {
+            console.error('Error searching contacts:', error)
         } finally {
             setIsLoading(false)
         }
@@ -109,28 +205,12 @@ export default function Contacts() {
             return daysUntil > 0 && daysUntil <= 7
         }).length
 
-        setStats({
-            total: contactList.length,
+        setStats(prev => ({
+            ...prev,
             active: contactList.filter(c => c.is_active).length,
             todayBirthdays,
             upcomingBirthdays: upcoming
-        })
-    }
-
-    const filterContacts = () => {
-        if (!searchQuery.trim()) {
-            setFilteredContacts(contacts)
-            return
-        }
-
-        const query = searchQuery.toLowerCase()
-        const filtered = contacts.filter(contact =>
-            contact.first_name.toLowerCase().includes(query) ||
-            contact.last_name.toLowerCase().includes(query) ||
-            contact.email?.toLowerCase().includes(query) ||
-            contact.phone.includes(query)
-        )
-        setFilteredContacts(filtered)
+        }))
     }
 
     const openAddDialog = () => {
@@ -249,8 +329,9 @@ export default function Contacts() {
                 }
             }
 
-            // Refresh list
+            // Refresh list and stats
             await fetchContacts()
+            await fetchTotalCount()
             setIsDialogOpen(false)
         } catch (error: any) {
             console.error('Error saving contact:', error)
@@ -292,12 +373,39 @@ export default function Contacts() {
                 }
             })
 
-            // Refresh list
+            // Refresh list and stats
             await fetchContacts()
+            await fetchTotalCount()
         } catch (error: any) {
             console.error('Error deleting contact:', error)
             alert("Failed to delete contact: " + error.message)
         }
+    }
+
+    // Pagination handlers
+    const goToPage = (page: number) => {
+        setPagination(prev => ({ ...prev, page }))
+    }
+
+    const nextPage = () => {
+        if (pagination.page < pagination.totalPages) {
+            setPagination(prev => ({ ...prev, page: prev.page + 1 }))
+        }
+    }
+
+    const prevPage = () => {
+        if (pagination.page > 1) {
+            setPagination(prev => ({ ...prev, page: prev.page - 1 }))
+        }
+    }
+
+    const handlePageSizeChange = (newSize: number) => {
+        setPagination(prev => ({
+            ...prev,
+            pageSize: newSize,
+            page: 1, // Reset to first page when changing page size
+            totalPages: Math.ceil(prev.totalCount / newSize)
+        }))
     }
 
     const getDaysUntilBirthday = (birthday: string) => {
@@ -322,7 +430,36 @@ export default function Contacts() {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     }
 
-    if (isLoading) {
+    // Calculate visible page range for pagination controls
+    const getVisiblePages = () => {
+        const current = pagination.page
+        const total = pagination.totalPages
+        const delta = 2 // Number of pages to show on each side of current page
+        const range = []
+        const rangeWithDots = []
+
+        for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
+            range.push(i)
+        }
+
+        if (current - delta > 2) {
+            rangeWithDots.push(1, '...')
+        } else {
+            rangeWithDots.push(1)
+        }
+
+        rangeWithDots.push(...range)
+
+        if (current + delta < total - 1) {
+            rangeWithDots.push('...', total)
+        } else if (total > 1) {
+            rangeWithDots.push(total)
+        }
+
+        return rangeWithDots
+    }
+
+    if (isLoading && contacts.length === 0) {
         return (
             <div className="flex items-center justify-center h-96">
                 <div className="text-center">
@@ -342,7 +479,7 @@ export default function Contacts() {
                         <CardTitle className="text-sm font-medium text-gray-600">Total Contacts</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-bold text-blue-600">{stats.total}</div>
+                        <div className="text-3xl font-bold text-blue-600">{stats.total.toLocaleString()}</div>
                     </CardContent>
                 </Card>
 
@@ -351,7 +488,7 @@ export default function Contacts() {
                         <CardTitle className="text-sm font-medium text-gray-600">Active</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-bold text-green-600">{stats.active}</div>
+                        <div className="text-3xl font-bold text-green-600">{stats.active.toLocaleString()}</div>
                     </CardContent>
                 </Card>
 
@@ -378,7 +515,7 @@ export default function Contacts() {
             <Card>
                 <CardHeader>
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                        <CardTitle>📇 All Contacts ({filteredContacts.length})</CardTitle>
+                        <CardTitle>📇 All Contacts ({stats.total.toLocaleString()})</CardTitle>
                         <div className="flex flex-col sm:flex-row gap-3">
                             <div className="relative flex-1 sm:w-64">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -520,7 +657,78 @@ export default function Contacts() {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {filteredContacts.length === 0 ? (
+                    {/* Pagination Controls - Top */}
+                    <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Show</span>
+                            <select
+                                value={pagination.pageSize}
+                                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                                className="border rounded px-2 py-1 text-sm"
+                            >
+                                {pageSizeOptions.map(size => (
+                                    <option key={size} value={size}>{size}</option>
+                                ))}
+                            </select>
+                            <span className="text-sm text-gray-600">contacts per page</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => goToPage(1)}
+                                disabled={pagination.page === 1}
+                            >
+                                <ChevronsLeft className="w-4 h-4" />
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={prevPage}
+                                disabled={pagination.page === 1}
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </Button>
+                            
+                            <div className="flex gap-1">
+                                {getVisiblePages().map((page, index) => (
+                                    <Button
+                                        key={index}
+                                        variant={page === pagination.page ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => typeof page === 'number' && goToPage(page)}
+                                        disabled={page === '...'}
+                                    >
+                                        {page}
+                                    </Button>
+                                ))}
+                            </div>
+                            
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={nextPage}
+                                disabled={pagination.page === pagination.totalPages}
+                            >
+                                <ChevronRight className="w-4 h-4" />
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => goToPage(pagination.totalPages)}
+                                disabled={pagination.page === pagination.totalPages}
+                            >
+                                <ChevronsRight className="w-4 h-4" />
+                            </Button>
+                        </div>
+                        
+                        <div className="text-sm text-gray-600">
+                            Showing {((pagination.page - 1) * pagination.pageSize + 1).toLocaleString()} to {Math.min(pagination.page * pagination.pageSize, pagination.totalCount).toLocaleString()} of {pagination.totalCount.toLocaleString()} contacts
+                        </div>
+                    </div>
+
+                    {contacts.length === 0 ? (
                         <div className="text-center py-12">
                             <div className="text-6xl mb-4">📭</div>
                             <h3 className="text-xl font-semibold text-gray-800 mb-2">
@@ -553,7 +761,7 @@ export default function Contacts() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {filteredContacts.map((contact) => (
+                                    {contacts.map((contact) => (
                                         <TableRow key={contact.id}>
                                             <TableCell>
                                                 <button
@@ -657,6 +865,64 @@ export default function Contacts() {
                                     ))}
                                 </TableBody>
                             </Table>
+                        </div>
+                    )}
+
+                    {/* Pagination Controls - Bottom */}
+                    {contacts.length > 0 && (
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-4 pt-4 border-t">
+                            <div className="text-sm text-gray-600">
+                                Showing {((pagination.page - 1) * pagination.pageSize + 1).toLocaleString()} to {Math.min(pagination.page * pagination.pageSize, pagination.totalCount).toLocaleString()} of {pagination.totalCount.toLocaleString()} contacts
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => goToPage(1)}
+                                    disabled={pagination.page === 1}
+                                >
+                                    <ChevronsLeft className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={prevPage}
+                                    disabled={pagination.page === 1}
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </Button>
+                                
+                                <div className="flex gap-1">
+                                    {getVisiblePages().map((page, index) => (
+                                        <Button
+                                            key={index}
+                                            variant={page === pagination.page ? "default" : "outline"}
+                                            size="sm"
+                                            onClick={() => typeof page === 'number' && goToPage(page)}
+                                            disabled={page === '...'}
+                                        >
+                                            {page}
+                                        </Button>
+                                    ))}
+                                </div>
+                                
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={nextPage}
+                                    disabled={pagination.page === pagination.totalPages}
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => goToPage(pagination.totalPages)}
+                                    disabled={pagination.page === pagination.totalPages}
+                                >
+                                    <ChevronsRight className="w-4 h-4" />
+                                </Button>
+                            </div>
                         </div>
                     )}
                 </CardContent>
