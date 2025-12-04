@@ -46,11 +46,12 @@ export default function Login() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <div className="flex items-center justify-center mb-4">
-            <div className="text-5xl">🎂</div>
+            <div className="text-5xl">
+              <img src="../../public/logonolt.png" width={"80%"} style={{textAlign: "center", margin: "auto"}}/></div>
           </div>
           <CardTitle className="text-2xl font-bold text-center">Welcome Back</CardTitle>
           <CardDescription className="text-center">
-            Sign in to your Birthday-Bot account
+            Sign in to manage NOLT Finance Birthday Automation App
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -60,7 +61,7 @@ export default function Login() {
               <Input
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder="you@noltfinance.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
