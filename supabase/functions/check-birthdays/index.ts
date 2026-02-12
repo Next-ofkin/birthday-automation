@@ -18,7 +18,7 @@ serve(async (req) => {
     try {
       const body = await req.json();
       if (body?.date) overrideDate = new Date(body.date);
-    } catch (_) {}
+    } catch (_) { }
 
     const today = overrideDate || new Date();
     const month = today.getUTCMonth() + 1;
@@ -87,11 +87,11 @@ serve(async (req) => {
 
       // SMS
       if (smsEnabled && smsTemplateId && c.phone) {
-        const result = await call("send-sms", {
+        const result = await call("send-sms-v2", {
           contactId: c.id,
           templateId: smsTemplateId,
           phoneNumber: c.phone,
-          userId: null
+          userId: c.created_by
         });
 
         if (result.ok && result.data?.success) smsSent++;
@@ -100,10 +100,10 @@ serve(async (req) => {
 
       // EMAIL
       if (emailEnabled && emailTemplateId && c.email) {
-        const result = await call("send-email", {
+        const result = await call("send-email-v2", {
           contactId: c.id,
           templateId: emailTemplateId,
-          userId: null
+          userId: c.created_by
         });
 
         if (result.ok && result.data?.success) emailSent++;
