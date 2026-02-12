@@ -18,7 +18,7 @@ export default function Login() {
     e.preventDefault()
     setError("")
     setIsLoading(true)
-    
+
     try {
       const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email,
@@ -47,7 +47,7 @@ export default function Login() {
         <CardHeader className="space-y-1">
           <div className="flex items-center justify-center mb-4">
             <div className="text-5xl">
-              <img src="../../public/logonolt.png" width={"80%"} style={{textAlign: "center", margin: "auto"}}/></div>
+              <img src="/logonolt.png" width={"80%"} style={{ textAlign: "center", margin: "auto" }} /></div>
           </div>
           <CardTitle className="text-2xl font-bold text-center">Welcome Back</CardTitle>
           <CardDescription className="text-center">
@@ -78,16 +78,16 @@ export default function Login() {
                 disabled={isLoading}
               />
             </div>
-            
+
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             )}
-            
+
             <div className="flex items-center justify-end">
-              <Link 
-                to="/forgot-password" 
+              <Link
+                to="/forgot-password"
                 className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
               >
                 Forgot password?

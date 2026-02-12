@@ -74,19 +74,19 @@ export default function ContactDetail() {
   const [isEditing, setIsEditing] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  
+
   // SMS functionality
   const [isSendingSMS, setIsSendingSMS] = useState(false)
   const [smsTemplates, setSmsTemplates] = useState<Template[]>([])
   const [showSMSDialog, setShowSMSDialog] = useState(false)
   const [selectedSMSTemplate, setSelectedSMSTemplate] = useState("")
-  
+
   // EMAIL functionality
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [emailTemplates, setEmailTemplates] = useState<Template[]>([])
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [selectedEmailTemplate, setSelectedEmailTemplate] = useState("")
-  
+
   const [recentMessages, setRecentMessages] = useState<MessageLog[]>([])
 
   // Edit form state
@@ -344,7 +344,7 @@ export default function ContactDetail() {
       console.log("Contact:", contact.first_name, contact.phone)
       console.log("Template:", selectedSMSTemplate)
 
-      const { data, error } = await supabase.functions.invoke("send-sms", {
+      const { data, error } = await supabase.functions.invoke("send-sms-v2", {
         body: {
           contactId: contact.id,
           templateId: selectedSMSTemplate,
@@ -380,7 +380,7 @@ export default function ContactDetail() {
         if (data?.details) {
           console.log("📋 Full Termii Response:", JSON.stringify(data.details, null, 2))
         }
-        
+
         fetchMessageLogs()
       }
     } catch (error: any) {
@@ -412,7 +412,7 @@ export default function ContactDetail() {
       console.log("Contact:", contact.first_name, contact.email)
       console.log("Template:", selectedEmailTemplate)
 
-      const { data, error } = await supabase.functions.invoke("send-email", {
+      const { data, error } = await supabase.functions.invoke("send-email-v2", {
         body: {
           contactId: contact.id,
           templateId: selectedEmailTemplate,
@@ -447,7 +447,7 @@ export default function ContactDetail() {
         if (data?.details) {
           console.log("📋 Full Resend Response:", JSON.stringify(data.details, null, 2))
         }
-        
+
         fetchMessageLogs()
       }
     } catch (error: any) {
@@ -762,20 +762,18 @@ export default function ContactDetail() {
               {recentMessages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`p-4 rounded-lg border ${
-                    msg.status === "sent"
+                  className={`p-4 rounded-lg border ${msg.status === "sent"
                       ? "bg-green-50 border-green-200"
                       : "bg-red-50 border-red-200"
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`text-xs font-semibold px-2 py-1 rounded ${
-                          msg.status === "sent"
+                        className={`text-xs font-semibold px-2 py-1 rounded ${msg.status === "sent"
                             ? "bg-green-600 text-white"
                             : "bg-red-600 text-white"
-                        }`}
+                          }`}
                       >
                         {msg.status.toUpperCase()}
                       </span>
@@ -786,11 +784,11 @@ export default function ContactDetail() {
                     <span className="text-xs text-gray-500">
                       {msg.sent_at
                         ? formatDistanceToNow(new Date(msg.sent_at), {
-                            addSuffix: true,
-                          })
+                          addSuffix: true,
+                        })
                         : formatDistanceToNow(new Date(msg.created_at), {
-                            addSuffix: true,
-                          })}
+                          addSuffix: true,
+                        })}
                     </span>
                   </div>
 

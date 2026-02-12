@@ -13,6 +13,16 @@ serve(async (req) => {
   }
 
   try {
+    // 1. Authorize Request (Must be Service Role or have Shared Secret)
+    const authHeader = req.headers.get('Authorization');
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    // Check if Authorization header matches Service Role Key
+    if (authHeader !== `Bearer ${serviceKey}`) {
+      console.error('❌ Unauthorized request to notify-new-user');
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const body = await req.json();
     const { userId, userEmail, userFullName } = body;
 
@@ -115,7 +125,7 @@ serve(async (req) => {
 
       // Create HTML email content
       const emailSubject = `New User Registration - ${userFullName || userEmail}`;
-      
+
       const emailHTML = `
 <!DOCTYPE html>
 <html>
@@ -176,11 +186,11 @@ serve(async (req) => {
                           <strong style="color: #667eea; font-size: 14px;">Registration Date:</strong>
                         </td>
                         <td style="padding: 8px 0; text-align: right;">
-                          <span style="color: #333333; font-size: 16px;">${new Date().toLocaleDateString('en-US', { 
-                            year: 'numeric', 
-                            month: 'long', 
-                            day: 'numeric' 
-                          })}</span>
+                          <span style="color: #333333; font-size: 16px;">${new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })}</span>
                         </td>
                       </tr>
                     </table>
